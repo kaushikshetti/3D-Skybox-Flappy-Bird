@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flappy Bird 3D Game with Skybox and Guns</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; }
+        #lives, #score {
+            position: absolute;
+            top: 10px;
+            color: white;
+            font-family: Arial, sans-serif;
+            font-size: 24px;
+        }
+        #lives { left: 10px; }
+        #score { right: 10px; }
+        #gameOverPopup {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            font-family: Arial, sans-serif;
+        }
+        #gameOverPopup h2 {
+            margin-top: 0;
+        }
+        #gameOverPopup button {
+            margin-top: 10px;
+            padding: 5px 10px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        #statsTable {
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: Arial, sans-serif;
+        }
+        #statsTable th, #statsTable td {
+            padding: 5px 10px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div id="lives">Lives: 3</div>
+    <div id="score">Score: 0</div>
+    <div id="gameOverPopup">
+        <h2>Game Over!</h2>
+        <p>Your score: <span id="finalScore"></span></p>
+        <button onclick="restartGame()">Play Again</button>
+    </div>
+    <table id="statsTable">
+        <tr>
+            <th>Lives</th>
+            <th>Score</th>
+        </tr>
+        <tr>
+            <td id="tableLives">3</td>
+            <td id="tableScore">0</td>
+        </tr>
+    </table>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Set up the scene, camera, and renderer
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Create skybox
+        const skyboxGeometry = new THREE.BoxGeometry(1000, 1000, 1000);
+        const skyboxMaterials = [
+            new THREE.MeshBasicMaterial({ map: new THREE.TextureLoader().load('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/cube/SwedishRoyalCastle/px.jpg'), side: THREE.BackSide }),
+            new THREE.MeshBasicMaterial({ map: new THREE.TextureLoader().load('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/cube/SwedishRoyalCastle/nx.jpg'), side: THREE.BackSide }),
+            new THREE.MeshBasicMaterial({ map: new THREE.TextureLoader().load('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/cube/SwedishRoyalCastle/py.jpg'), side: THREE.BackSide }),
+            new THREE.MeshBasicMaterial({ map: new THREE.TextureLoader().load('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/cube/SwedishRoyalCastle/ny.jpg'), side: THREE.BackSide }),
+            new THREE.MeshBasicMaterial({ map: new THREE.TextureLoader().load('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/cube/SwedishRoyalCastle/pz.jpg'), side: THREE.BackSide }),
+            new THREE.MeshBasicMaterial({ map: new THREE.TextureLoader().load('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/cube/SwedishRoyalCastle/nz.jpg'), side: THREE.BackSide }),
+        ];
+        const skybox = new THREE.Mesh(skyboxGeometry, skyboxMaterials);
+        scene.add(skybox);
+
+        // Create the large horizontal cube (game container)
+        const containerGeometry = new THREE.BoxGeometry(30, 2, 10);
+        const containerMaterial = new THREE.MeshPhongMaterial({ 
+            color: 0x303030,
+            specular: 0x111111,
+            shininess: 30,
+            side: THREE.DoubleSide
+        });
+        const container = new THREE.Mesh(containerGeometry, containerMaterial);
+        container.position.y = -5;
+        scene.add(container);
+
+        // Add ambient light
+        const ambientLight = new THREE.AmbientLight(0x404040);
+        scene.add(ambientLight);
+
+        // Add directional light
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+        directionalLight.position.set(1, 1, 1);
+        scene.add(directionalLight);
+
+        // Add point light for better 3D effect
+        const pointLight = new THREE.PointLight(0xffffff, 0.5);
+        pointLight.position.set(0, 10, 0);
+        scene.add(pointLight);
+
+        // Create the Flappy Bird (player)
+        const playerGeometry = new THREE.PlaneGeometry(1.5, 1.5);
+        const textureLoader = new THREE.TextureLoader();
+        const playerTexture = textureLoader.load('https://raw.githubusercontent.com/sourabhv/FlapPyBird/master/assets/sprites/yellowbird-midflap.png');
+        const playerMaterial = new THREE.MeshBasicMaterial({ 
+            map: playerTexture,
+            transparent: true,
+            side: THREE.DoubleSide
+        });
+        const player = new THREE.Mesh(playerGeometry, playerMaterial);
+        player.position.set(-13, 1.5, 0);
+        player.velocity = 0;
+        container.add(player);
+
+        // Create guns and bullets
+        const guns = [];
+        const bullets = [];
+        const gunGeometry = new THREE.BoxGeometry(1, 0.5, 0.5);
+        const gunMaterial = new THREE.MeshPhongMaterial({ color: 0x808080 });
+
+        // Create fire emoji texture
+        function createFireEmojiTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 64;
+            canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            ctx.font = '50px Arial';
+            ctx.fillStyle = 'orange';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('🔥', 32, 32);
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        const fireEmojiTexture = createFireEmojiTexture();
+        const bulletGeometry = new THREE.PlaneGeometry(0.5, 0.5);
+        const bulletMaterial = new THREE.MeshBasicMaterial({ 
+            map: fireEmojiTexture,
+            transparent: true,
+            side: THREE.DoubleSide
+        });
+
+        function spawnGun() {
+            const gun = new THREE.Mesh(gunGeometry, gunMaterial);
+            gun.position.set(13, Math.random() * 6 + 1, 0);
+            gun.rotation.y = Math.PI / 2;
+            container.add(gun);
+            guns.push(gun);
+        }
+
+        function fireBullet(gun) {
+            const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
+            bullet.position.copy(gun.position);
+            bullet.velocity = new THREE.Vector3(-0.2, 0, 0);
+            container.add(bullet);
+            bullets.push(bullet);
+        }
+
+        // Set up game variables
+        const gravity = -0.003;
+        const jumpStrength = 0.35;
+        let gameOver = false;
+        let score = 0;
+        let canJump = true;
+        let lives = 3;
+
+        // Position the camera
+        camera.position.z = 20;
+        camera.position.y = 0;
+
+        // Handle user input
+        document.addEventListener('keydown', (event) => {
+            if ((event.code === 'Space' || event.key === ' ') && !gameOver && canJump) {
+                player.velocity = jumpStrength;
+                canJump = false;
+            }
+        });
+
+        document.addEventListener('keyup', (event) => {
+            if (event.code === 'Space' || event.key === ' ') {
+                canJump = true;
+            }
+        });
+
+        // Mouse movement variables
+        let mouseX = 0;
+        let mouseY = 0;
+        let targetRotationX = 0;
+        let targetRotationY = 0;
+
+        // Handle mouse movement
+        document.addEventListener('mousemove', (event) => {
+            mouseX = (event.clientX / window.innerWidth) * 2 - 1;
+            mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
+            
+            targetRotationY = mouseX * 0.5;
+            targetRotationX = mouseY * 0.3;
+        });
+
+        // Check for collision
+        function checkCollision(object1, object2) {
+            const box1 = new THREE.Box3().setFromObject(object1);
+            const box2 = new THREE.Box3().setFromObject(object2);
+            return box1.intersectsBox(box2);
+        }
+
+        // Game over function
+        function endGame() {
+            gameOver = true;
+            document.getElementById('finalScore').textContent = score;
+            document.getElementById('gameOverPopup').style.display = 'block';
+        }
+
+        // Restart game function
+        function restartGame() {
+            score = 0;
+            lives = 3;
+            gameOver = false;
+            player.position.set(-13, 1.5, 0);
+            player.velocity = 0;
+
+            guns.forEach(gun => container.remove(gun));
+            guns.length = 0;
+            bullets.forEach(bullet => container.remove(bullet));
+            bullets.length = 0;
+
+            updateScoreDisplay();
+            updateLivesDisplay();
+
+            document.getElementById('gameOverPopup').style.display = 'none';
+
+            animate();
+        }
+
+        // Update score display
+        function updateScoreDisplay() {
+            document.getElementById('score').textContent = 'Score: ' + score;
+            document.getElementById('tableScore').textContent = score;
+        }
+
+        // Update lives display
+        function updateLivesDisplay() {
+            document.getElementById('lives').textContent = 'Lives: ' + lives;
+            document.getElementById('tableLives').textContent = lives;
+        }
+
+        // Animation function
+        function animate() {
+            if (!gameOver) {
+                requestAnimationFrame(animate);
+
+                skybox.rotation.y += (targetRotationY - skybox.rotation.y) * 0.05;
+                skybox.rotation.x += (targetRotationX - skybox.rotation.x) * 0.05;
+
+                container.rotation.z = -targetRotationX * 0.2;
+                container.rotation.x = -targetRotationY * 0.2;
+
+                player.velocity += gravity;
+                player.position.y += player.velocity;
+
+                // Update player rotation based on velocity
+                player.rotation.z = Math.min(Math.max(player.velocity * 2, -Math.PI / 4), Math.PI / 4);
+
+                if (player.position.y < 1.5) {
+                    player.position.y = 1.5;
+                    player.velocity = 0;
+                } else if (player.position.y > 9) {
+                    player.position.y = 9;
+                    player.velocity = 0;
+                }
+
+                // Update guns and bullets
+                guns.forEach((gun, index) => {
+                    gun.position.x -= 0.05;
+                    
+                    if (gun.position.x < -15) {
+                        container.remove(gun);
+                        guns.splice(index, 1);
+                        score++;
+                        updateScoreDisplay();
+                    }
+
+                    if (Math.random() < 0.02) {
+                        fireBullet(gun);
+                    }
+                });
+
+                bullets.forEach((bullet, index) => {
+                    bullet.position.add(bullet.velocity);
+                    bullet.lookAt(camera.position);
+                    
+                    if (bullet.position.x < -15) {
+                        container.remove(bullet);
+                        bullets.splice(index, 1);
+                    }
+
+                    if (checkCollision(player, bullet)) {
+                        lives--;
+                        updateLivesDisplay();
+                        container.remove(bullet);
+                        bullets.splice(index, 1);
+                        
+                        if (lives <= 0) {
+                            endGame();
+                        }
+                    }
+                });
+
+                if (Math.random() < 0.005 && guns.length < 3) {
+                    spawnGun();
+                }
+
+                renderer.render(scene, camera);
+            }
+        }
+
+        // Handle window resizing
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Start the animation
+        animate();
+        updateLivesDisplay();
+        updateScoreDisplay();
+    </script>
+</body>
+</html>
